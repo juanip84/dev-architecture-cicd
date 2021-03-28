@@ -1,0 +1,36 @@
+pipeline{
+    agent any
+    environment {
+        bucket='bucket_name'
+    }
+    stages {
+        stage('checkout') {
+            steps {
+                git url:'git@bitbucket.org:workspace_name/repo_name.git',
+                    credentialsId: 'REPO_SSH_KEY'
+            }
+        }
+        stage('config') {
+            steps {
+               sh '''
+                 cp ./.env.dev ./.env
+               '''
+            }
+        }
+        stage('build') {
+            steps {
+                sh '''
+                 quasar build -m spa
+                '''
+            }
+        }
+        
+        stage('push to s3') {
+            steps {
+               dir('dist/spa') {
+                    sh 'aws s3 cp ./ s3://${bucket}/ --recursive'
+               }
+            }
+        }
+    }
+}

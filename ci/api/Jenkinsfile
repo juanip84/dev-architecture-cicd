@@ -1,0 +1,51 @@
+pipeline{
+    agent any
+    environment {
+        NAME='ecr-name'
+        AWS_ECR_URI='account_id.dkr.ecr.us-east-2.amazonaws.com'
+    }
+    stages {
+        stage('check') {
+            steps {
+                git url:'git@bitbucket.org:workspace_name/repo_name.git',
+                    credentialsId: 'REPO_SSH_KEY'
+
+                script {
+                    env.VERSION = sh(returnStdout: true, script: 'git describe --tags `git rev-list --tags --max-count=1`')
+                }
+                    
+                sh '''                    
+                    MANIFEST=$(aws ecr batch-get-image --repository-name $NAME --image-ids imageTag=$VERSION --query 'images[].imageManifest' --output text --region us-east-2)
+                    
+                    if [ "$MANIFEST" != "" ]; then 
+                        echo version: $VERSION already exists on ECR;
+                        exit 3;
+                    fi
+                '''
+            }
+        }
+        stage('checkout') {
+            steps {
+                sh '''
+                git checkout $VERSION
+                '''
+            }
+        }
+        stage('build') {
+            steps {
+                sh '''
+                docker build -f ./Dockerfile --target runner -t $NAME:$VERSION ./
+                '''
+            }
+        }
+        stage('push') {
+            steps {
+                sh '`aws ecr get-login --no-include-email --region us-east-2`'
+                sh '''
+                    docker tag $NAME:$VERSION $AWS_ECR_URI/$NAME:$VERSION
+                    docker push $AWS_ECR_URI/$NAME:$VERSION
+                '''
+            }
+        }
+    }
+}

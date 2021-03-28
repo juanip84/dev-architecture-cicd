@@ -1,0 +1,42 @@
+pipeline{
+    agent any
+    environment {
+        NAME='ecr-name'
+        AWS_ECR_URI='account_id.dkr.ecr.us-east-2.amazonaws.com'
+        ECS_CLUSTER='ecs-cluster-name'
+        ECS_SERVICE='ecs-service-name'
+        ENV_TAG='latest'
+        REGION='region'
+   }
+    stages {
+        stage('tag') {
+            steps { 
+                sh '`aws ecr get-login --no-include-email --region $REGION`'
+                sh '''
+                    MANIFEST=$(aws ecr batch-get-image --repository-name $NAME --image-ids imageTag=$VERSION --query 'images[].imageManifest'  --output text --region $REGION)
+                    aws ecr put-image --repository-name $NAME --image-tag $ENV_TAG --image-manifest "$MANIFEST" --region $REGION
+                '''
+            }
+        }
+        stage('deploy') {
+            steps {
+                    sh 'aws ecs update-service --cluster $ECS_CLUSTER --service $ECS_SERVICE --force-new-deployment --region $REGION'
+                    sh '''
+                        i=0
+                        while [ $i -lt 20 ]
+                            do
+                            sleep 30s
+                            message=$(aws ecs describe-services --cluster $ECS_CLUSTER --service $ECS_SERVICE --region $REGION | jq --raw-output ".services[0].events[0].message")
+                            case "$message" in
+                                *"has reached a steady state"* ) echo $message && exit 0;;
+                                * ) echo "Deploy still in progress...";;
+                            esac
+                            i=$(($i+1))
+                            done
+                        echo "Service could not reach steady state in 10 minutes, check ECS for inconveniences"
+                        exit 3
+                    '''
+            }
+        }
+    }
+}
